@@ -39,13 +39,6 @@ import { isSupabaseConfigured, supabase } from './lib/supabase.js';
 import { LocalRepository, SupabaseRepository } from './lib/repository.js';
 import { getTodayKey, insertNoteBlock } from './lib/workspace.js';
 
-const AVATAR_COLORS = {
-  coral: '#f29a77',
-  stone: '#777f78',
-  blue: '#7da9ef',
-  mint: '#98d3ba',
-};
-
 const BLOCK_TYPES = [
   { value: 'paragraph', label: 'Text' },
   { value: 'heading', label: 'Heading' },
@@ -66,16 +59,6 @@ function getInviteTokenFromPath() {
 function makeLocalId(prefix) {
   if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function initials(name = '?') {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
 }
 
 function formatTime(value) {
@@ -143,8 +126,13 @@ export default function App() {
     }
 
     let mounted = true;
+    let activeUserId = null;
+    let loadVersion = 0;
+    let sessionVersion = 0;
     const loadUser = async (user, inviteToken = pendingInvite) => {
-      if (!user || !mounted) return;
+      if (!user || !mounted || activeUserId === user.id) return;
+      activeUserId = user.id;
+      const version = ++loadVersion;
       setAuthLoading(true);
       setError(null);
       const remoteRepository = new SupabaseRepository(supabase, user);
@@ -156,19 +144,25 @@ export default function App() {
           window.history.replaceState({}, '', '/');
         }
         const data = await remoteRepository.load();
-        if (!mounted) return;
+        if (!mounted || version !== loadVersion) return;
         setRepository(remoteRepository);
         setWorkspace(data);
         setActiveChatId(data ? getSortedChats(data.chats)[0]?.id || null : null);
       } catch (loadError) {
-        if (mounted) setError(getErrorMessage(loadError));
+        if (mounted && version === loadVersion) {
+          activeUserId = null;
+          setWorkspace(undefined);
+          setError(getErrorMessage(loadError));
+        }
       } finally {
-        if (mounted) setAuthLoading(false);
+        if (mounted && version === loadVersion) setAuthLoading(false);
       }
     };
 
     const initialize = async () => {
+      const version = sessionVersion;
       const { data, error: sessionError } = await supabase.auth.getSession();
+      if (!mounted || version !== sessionVersion) return;
       if (sessionError) setError(getErrorMessage(sessionError));
       setSession(data.session);
       if (data.session?.user) await loadUser(data.session.user);
@@ -176,9 +170,18 @@ export default function App() {
     };
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      const version = ++sessionVersion;
       setSession(nextSession);
-      if (nextSession?.user) loadUser(nextSession.user);
+      if (nextSession?.user) {
+        // Supabase callbacks must finish before making further auth-backed requests.
+        window.setTimeout(() => {
+          if (version === sessionVersion) loadUser(nextSession.user);
+        }, 0);
+      }
       else {
+        activeUserId = null;
+        loadVersion += 1;
         setRepository(null);
         setWorkspace(null);
         setAuthLoading(false);
@@ -299,14 +302,14 @@ export default function App() {
     setShowProfile(false);
   };
 
-  if (authLoading || workspace === undefined) return <LoadingScreen />;
+  if (authLoading || workspace === undefined) return error ? <div className="error-toast" role="alert">{error}</div> : null;
   if (isSupabaseConfigured && !session) {
     return <SignInScreen pendingInvite={pendingInvite} error={error} />;
   }
   if (isSupabaseConfigured && !workspace) {
     return <SetupScreen pendingInvite={pendingInvite} onCreateSpace={handleCreateSpace} error={error} />;
   }
-  if (!repository || !workspace) return <LoadingScreen />;
+  if (!repository || !workspace) return error ? <div className="error-toast" role="alert">{error}</div> : null;
 
   const activeChat = workspace.chats.find((chat) => chat.id === activeChatId) || getSortedChats(workspace.chats)[0];
 
@@ -380,15 +383,6 @@ export default function App() {
       {showWorkspaceLink && (
         <WorkspaceLinkModal onClose={() => setShowWorkspaceLink(false)} onSave={handleAddWorkspaceLink} />
       )}
-    </div>
-  );
-}
-
-function LoadingScreen() {
-  return (
-    <div className="loading-screen">
-      <div className="brand-mark">n</div>
-      <span>opening Nootion</span>
     </div>
   );
 }
@@ -536,21 +530,12 @@ function TopBar({ view, activeChat, profile, partner, onHome, onDiscussion, onSh
         </div>
       </div>
       <div className="top-right">
-        {partner && <div className="partner-stack" title={`${partner.displayName} is part of this page`}><Avatar user={partner} size="small" /></div>}
         <button type="button" className="top-action" onClick={onShare}><Share2 size={15} /> Share</button>
         <button type="button" className="icon-button quiet icon-with-badge" aria-label="Open discussion" title="Discussion" onClick={onDiscussion}><MessageCircle size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}</button>
         <button type="button" className="icon-button quiet" aria-label="Favorite page" title="Favorite"><Star size={18} /></button>
-        <button type="button" className="profile-button" aria-label="Open profile" title="Profile" onClick={onProfile}><Avatar user={profile} /></button>
+        <button type="button" className="icon-button quiet" aria-label="Open profile" title="Profile" onClick={onProfile}><Settings2 size={18} /></button>
       </div>
     </header>
-  );
-}
-
-function Avatar({ user, size = 'regular' }) {
-  return (
-    <span className={`avatar avatar-${size}`} style={{ '--avatar-color': AVATAR_COLORS[user?.avatarColor] || AVATAR_COLORS.stone }} aria-hidden="true">
-      {initials(user?.displayName || '?')}
-    </span>
   );
 }
 
@@ -679,7 +664,6 @@ function MessageRow({ message, author, currentUser, replyTarget, messageLookup, 
 
   return (
     <article className={`message-row ${ownMessage ? 'is-own' : ''}`} id={`message-${message.id}`}>
-      <Avatar user={author} />
       <div className="message-column">
         <div className="message-meta"><strong>{author.displayName}</strong><time>{formatTime(message.createdAt)}</time>{message.editedAt && <span>edited</span>}</div>
         {editing ? (
@@ -991,7 +975,6 @@ function WorkspaceLinkModal({ onClose, onSave }) {
 
 function ProfileModal({ profile, onClose, onSave, onSignOut }) {
   const [displayName, setDisplayName] = useState(profile.displayName);
-  const [avatarColor, setAvatarColor] = useState(profile.avatarColor);
   const [notificationsEnabled, setNotificationsEnabled] = useState(profile.notificationsEnabled);
   const [notificationError, setNotificationError] = useState('');
 
@@ -1011,14 +994,12 @@ function ProfileModal({ profile, onClose, onSave, onSignOut }) {
 
   return (
     <Modal title="Your profile" eyebrow="account settings" onClose={onClose}>
-      <div className="profile-preview"><Avatar user={{ displayName, avatarColor }} size="large" /><div><strong>{displayName || 'your name'}</strong><span>{profile.email}</span></div></div>
+      <div className="profile-preview"><div><strong>{displayName || 'your name'}</strong><span>{profile.email}</span></div></div>
       <label htmlFor="profile-name">Name</label>
       <input id="profile-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-      <div className="profile-field-label">Avatar color</div>
-      <div className="color-options">{Object.entries(AVATAR_COLORS).map(([name, color]) => <button type="button" className={`color-option ${avatarColor === name ? 'selected' : ''}`} style={{ '--swatch-color': color }} aria-label={`${name} avatar color`} title={name} key={name} onClick={() => setAvatarColor(name)}><span /></button>)}</div>
       <div className="setting-row"><div><strong>Desktop notifications</strong><span>Get a quiet alert for new messages.</span></div><button type="button" className={`toggle ${notificationsEnabled ? 'on' : ''}`} aria-label="Toggle desktop notifications" aria-pressed={notificationsEnabled} onClick={() => notificationsEnabled ? setNotificationsEnabled(false) : toggleNotifications()}><span /></button></div>
       {notificationError && <p className="form-error">{notificationError}</p>}
-      <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button compact" onClick={() => onSave({ displayName: displayName.trim() || profile.displayName, avatarColor, notificationsEnabled })}>Save changes <Check size={14} /></button></div>
+      <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button compact" onClick={() => onSave({ displayName: displayName.trim() || profile.displayName, avatarColor: profile.avatarColor, notificationsEnabled })}>Save changes <Check size={14} /></button></div>
       {onSignOut && <button type="button" className="sign-out-button" onClick={onSignOut}><LogOut size={14} /> Sign out</button>}
     </Modal>
   );

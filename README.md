@@ -4,6 +4,8 @@ A desktop-first, Notion-shaped shared page with WhatsApp-style messages, inline 
 
 Light mode is the default. Use the light/dark mode button in the bottom-left corner on any screen to switch themes. Your choice is saved in this browser.
 
+Profiles and messages use names without avatars. Returning to a tab keeps the current page, draft, and scroll position rather than reopening the workspace on same-account auth refresh events. Startup has no full-screen loading animation.
+
 ## Local preview
 
 ```powershell
