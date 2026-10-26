@@ -2,6 +2,8 @@
 
 A desktop-first, Notion-shaped shared page with WhatsApp-style messages, inline replies, daily chats, private notes, private inline comments, and file uploads.
 
+Light mode is the default. Use the light/dark mode button in the bottom-left corner on any screen to switch themes. Your choice is saved in this browser.
+
 ## Local preview
 
 ```powershell
