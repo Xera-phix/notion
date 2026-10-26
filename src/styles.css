@@ -60,6 +60,8 @@
 [data-theme='light'] :is(.message-menu button, .sign-out-button, .form-error, .workspace-remove:hover) { color: #9a3821; }
 [data-theme='light'] .success-toast { border-color: #a6c5ac; background: #e6f1e4; color: #245638; }
 [data-theme='light'] .error-toast { border-color: #d3a99a; background: #fff0e9; color: #92371f; }
+[data-theme='light'] .primary-button { border-color: #245fa8; color: #ffffff; }
+[data-theme='light'] .primary-button:hover { border-color: #194c8b; background: #194c8b; }
 
 * { box-sizing: border-box; }
 html { min-width: 320px; background: var(--bg); }
